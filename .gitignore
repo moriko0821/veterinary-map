@@ -33,6 +33,10 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 
+# import script の実行時生成物 (再実行可能なので Git 管理不要)
+scripts/.import-progress.json
+scripts/.import-errors.csv
+
 # vercel
 .vercel
 
