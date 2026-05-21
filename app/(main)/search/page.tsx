@@ -1,5 +1,10 @@
+import { Suspense } from 'react';
 import SearchLanding from '@/components/SearchLanding';
 
 export default function SearchPage() {
-  return <SearchLanding />;
+  return (
+    <Suspense fallback={null}>
+      <SearchLanding />
+    </Suspense>
+  );
 }
