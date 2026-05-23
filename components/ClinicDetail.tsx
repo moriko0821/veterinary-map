@@ -129,9 +129,11 @@ export default function ClinicDetail({ id }: Props) {
       const callMode = async (travelMode: 'WALKING' | 'DRIVING' | 'TRANSIT'): Promise<string | undefined> => {
         try {
           // ComputeRouteMatrixRequest:
-          //   origins/destinations: LatLng を配列に直接入れる (Waypoint ラップ不要)
-          //   fields: 必須。JS SDKでの正式名は 'durationMillis' (REST APIの 'duration' とは違う)
-          //   RouteMatrixItem.durationMillis は数値(ミリ秒)
+          //   - origins/destinations: LatLng を配列に直接 (Waypoint ラップ不要)
+          //   - travelMode: WALKING/DRIVING/TRANSIT (旧 TravelMode enum と同じ)
+          //   - fields: 必須。JS SDKでの正式名は 'durationMillis'
+          // 戻り値: Promise<{matrix: RouteMatrix}>
+          //   matrix.rows[origin_idx].items[destination_idx] が RouteMatrixItem
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const request: any = {
             origins: [originLatLng],
@@ -139,24 +141,25 @@ export default function ClinicDetail({ id }: Props) {
             travelMode,
             fields: ['condition', 'durationMillis'],
           };
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const iter: AsyncIterable<any> = await RouteMatrix.computeRouteMatrix(request);
-          for await (const el of iter) {
-            // condition: 'ROUTE_EXISTS' | 'ROUTE_NOT_FOUND'
-            if (el?.condition !== 'ROUTE_EXISTS') {
-              console.warn(`[RouteMatrix] mode=${travelMode} condition=${el?.condition}`);
-              return undefined;
-            }
-            const ms = el?.durationMillis;
-            if (typeof ms !== 'number' || isNaN(ms)) {
-              console.warn(`[RouteMatrix] mode=${travelMode} no durationMillis:`, el);
-              return undefined;
-            }
-            return formatDuration(Math.round(ms / 1000));
+          const { matrix } = await RouteMatrix.computeRouteMatrix(request);
+          const item = matrix?.rows?.[0]?.items?.[0];
+          if (!item) {
+            console.warn(`[RouteMatrix] mode=${travelMode} no item in matrix`);
+            return undefined;
           }
-          return undefined;
+          if (item.condition !== 'ROUTE_EXISTS') {
+            // 経路が見つからない (公共交通の場合は自然なケース)
+            return undefined;
+          }
+          const ms = item.durationMillis;
+          if (typeof ms !== 'number' || isNaN(ms)) {
+            console.warn(`[RouteMatrix] mode=${travelMode} no durationMillis:`, item);
+            return undefined;
+          }
+          return formatDuration(Math.round(ms / 1000));
         } catch (e) {
-          console.warn(`[RouteMatrix] mode=${travelMode} error:`, e);
+          // 実装バグ vs API認可エラーを区別 (誤誘導を防ぐ)
+          console.error(`[RouteMatrix] mode=${travelMode} error:`, e);
           return undefined;
         }
       };
@@ -167,15 +170,15 @@ export default function ClinicDetail({ id }: Props) {
         callMode('TRANSIT'),
       ]);
 
-      // 全部 undefined だったら明確にエラー表示
-      if (!walking && !driving && !transit) {
-        setTravelError(
-          '所要時間を取得できませんでした。Routes API が有効化されているか、API キーの制限を確認してください。',
-        );
+      // 1つでも値が取れていれば成功表示 (公共交通だけ「なし」は許容)
+      if (walking || driving || transit) {
+        setTravelInfo({ walking, driving, transit });
         return;
       }
-
-      setTravelInfo({ walking, driving, transit });
+      // 全部空 = 通信失敗 or 設定問題の可能性大。コンソールに詳細あり
+      setTravelError(
+        '所要時間を取得できませんでした。しばらく経ってから再度お試しください。',
+      );
     } catch (e) {
       console.error('[ClinicDetail] travel time error:', e);
       const msg = (e as Error)?.message ?? '';
