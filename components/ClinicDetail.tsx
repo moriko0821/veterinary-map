@@ -152,25 +152,61 @@ export default function ClinicDetail({ id }: Props) {
               routingPreference: 'LESS_WALKING',
             };
           }
-          const { matrix } = await RouteMatrix.computeRouteMatrix(request);
+
+          // ===== DEBUG: 送信するリクエスト全体をログ =====
+          console.log(`[RouteMatrix DEBUG][${travelMode}] REQUEST:`, JSON.parse(JSON.stringify({
+            origins: [{ lat: pos.coords.latitude, lng: pos.coords.longitude }],
+            destinations: [{ lat: clinic.lat, lng: clinic.lng }],
+            travelMode,
+            fields: request.fields,
+            language: request.language,
+            region: request.region,
+            departureTime: request.departureTime?.toISOString(),
+            transitPreference: request.transitPreference,
+          })));
+
+          const response = await RouteMatrix.computeRouteMatrix(request);
+
+          // ===== DEBUG: レスポンス全体をログ =====
+          console.log(`[RouteMatrix DEBUG][${travelMode}] RESPONSE:`, response);
+          const { matrix } = response ?? {};
+          console.log(`[RouteMatrix DEBUG][${travelMode}] matrix:`, matrix);
+          console.log(`[RouteMatrix DEBUG][${travelMode}] matrix.rows:`, matrix?.rows);
+          console.log(`[RouteMatrix DEBUG][${travelMode}] rows[0]:`, matrix?.rows?.[0]);
+          console.log(`[RouteMatrix DEBUG][${travelMode}] rows[0].items:`, matrix?.rows?.[0]?.items);
+
           const item = matrix?.rows?.[0]?.items?.[0];
+          console.log(`[RouteMatrix DEBUG][${travelMode}] item:`, item);
+          // item の各プロパティを個別ログ (getter の値を確認するため)
+          if (item) {
+            console.log(`[RouteMatrix DEBUG][${travelMode}] item.condition:`, item.condition);
+            console.log(`[RouteMatrix DEBUG][${travelMode}] item.durationMillis:`, item.durationMillis);
+            console.log(`[RouteMatrix DEBUG][${travelMode}] item.distanceMeters:`, item.distanceMeters);
+            console.log(`[RouteMatrix DEBUG][${travelMode}] item.error:`, item.error);
+            console.log(`[RouteMatrix DEBUG][${travelMode}] all keys:`, Object.keys(Object.getPrototypeOf(item) ?? {}));
+          }
+
           if (!item) {
             console.warn(`[RouteMatrix] mode=${travelMode} no item in matrix`);
             return undefined;
           }
           if (item.condition !== 'ROUTE_EXISTS') {
-            // 経路が見つからない (公共交通の場合は自然なケース)
+            console.warn(`[RouteMatrix] mode=${travelMode} condition=${item.condition} (expected ROUTE_EXISTS)`);
             return undefined;
           }
           const ms = item.durationMillis;
           if (typeof ms !== 'number' || isNaN(ms)) {
-            console.warn(`[RouteMatrix] mode=${travelMode} no durationMillis:`, item);
+            console.warn(`[RouteMatrix] mode=${travelMode} no durationMillis (type=${typeof ms}, value=${ms}):`, item);
             return undefined;
           }
+          console.log(`[RouteMatrix DEBUG][${travelMode}] SUCCESS durationMillis=${ms}ms => ${formatDuration(Math.round(ms / 1000))}`);
           return formatDuration(Math.round(ms / 1000));
         } catch (e) {
-          // 実装バグ vs API認可エラーを区別 (誤誘導を防ぐ)
-          console.error(`[RouteMatrix] mode=${travelMode} error:`, e);
+          console.error(`[RouteMatrix] mode=${travelMode} EXCEPTION:`, e);
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          console.error(`[RouteMatrix] mode=${travelMode} error message:`, (e as any)?.message);
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          console.error(`[RouteMatrix] mode=${travelMode} error name:`, (e as any)?.name);
           return undefined;
         }
       };
