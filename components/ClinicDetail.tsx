@@ -110,13 +110,17 @@ export default function ClinicDetail({ id }: Props) {
 
       // 3) 新しい Routes ライブラリを動的読み込み (旧 DistanceMatrix の置き換え)
       //    Google が 2026-02-25 に DistanceMatrix を非推奨化、12ヶ月後削除予定。
-      //    Routes API は公共交通機関のルーティングが大幅改善されている。
+      //    RouteMatrix: 多OD向け / Route.computeRoutes: 単一区間で乗換案内が強い
       //    eslint-disable-next-line @typescript-eslint/no-explicit-any
       const routesLib = (await google.maps.importLibrary('routes')) as any;
       const RouteMatrix = routesLib?.RouteMatrix;
+      const Route = routesLib?.Route;
       if (!RouteMatrix?.computeRouteMatrix) {
         throw new Error('Routes API not available');
       }
+
+      const isDev = process.env.NODE_ENV === 'development';
+      const dlog = (...args: unknown[]) => { if (isDev) console.log(...args); };
 
       // 4) 経路ごとに RouteMatrix を呼ぶ
       //    JS SDK は google.maps.LatLng インスタンスを期待 (REST形式 {latitude} ではない)
@@ -146,67 +150,53 @@ export default function ClinicDetail({ id }: Props) {
           };
           if (travelMode === 'TRANSIT') {
             request.departureTime = new Date();
-            request.transitPreference = {
-              // TRAM は API 非対応。路面電車は LIGHT_RAIL を使う (InvalidValueError 回避)
-              allowedTransitModes: ['TRAIN', 'SUBWAY', 'BUS', 'RAIL', 'LIGHT_RAIL'],
-              routingPreference: 'LESS_WALKING',
-            };
+            // transitPreference は意図的に外す: LESS_WALKING 等の制約が
+            // ROUTE_NOT_FOUND を増やすため、デフォルト (全モード許可) で広く探す
           }
 
-          // ===== DEBUG: 送信するリクエスト全体をログ =====
-          console.log(`[RouteMatrix DEBUG][${travelMode}] REQUEST:`, JSON.parse(JSON.stringify({
-            origins: [{ lat: pos.coords.latitude, lng: pos.coords.longitude }],
-            destinations: [{ lat: clinic.lat, lng: clinic.lng }],
-            travelMode,
-            fields: request.fields,
-            language: request.language,
-            region: request.region,
-            departureTime: request.departureTime?.toISOString(),
-            transitPreference: request.transitPreference,
-          })));
-
+          dlog(`[RouteMatrix][${travelMode}] REQUEST origin=${pos.coords.latitude},${pos.coords.longitude} dest=${clinic.lat},${clinic.lng}`);
           const response = await RouteMatrix.computeRouteMatrix(request);
-
-          // ===== DEBUG: レスポンス全体をログ =====
-          console.log(`[RouteMatrix DEBUG][${travelMode}] RESPONSE:`, response);
           const { matrix } = response ?? {};
-          console.log(`[RouteMatrix DEBUG][${travelMode}] matrix:`, matrix);
-          console.log(`[RouteMatrix DEBUG][${travelMode}] matrix.rows:`, matrix?.rows);
-          console.log(`[RouteMatrix DEBUG][${travelMode}] rows[0]:`, matrix?.rows?.[0]);
-          console.log(`[RouteMatrix DEBUG][${travelMode}] rows[0].items:`, matrix?.rows?.[0]?.items);
-
           const item = matrix?.rows?.[0]?.items?.[0];
-          console.log(`[RouteMatrix DEBUG][${travelMode}] item:`, item);
-          // item の各プロパティを個別ログ (getter の値を確認するため)
-          if (item) {
-            console.log(`[RouteMatrix DEBUG][${travelMode}] item.condition:`, item.condition);
-            console.log(`[RouteMatrix DEBUG][${travelMode}] item.durationMillis:`, item.durationMillis);
-            console.log(`[RouteMatrix DEBUG][${travelMode}] item.distanceMeters:`, item.distanceMeters);
-            console.log(`[RouteMatrix DEBUG][${travelMode}] item.error:`, item.error);
-            console.log(`[RouteMatrix DEBUG][${travelMode}] all keys:`, Object.keys(Object.getPrototypeOf(item) ?? {}));
+          dlog(`[RouteMatrix][${travelMode}] item.condition=${item?.condition} durationMillis=${item?.durationMillis}`);
+
+          if (item?.condition === 'ROUTE_EXISTS') {
+            const ms = item.durationMillis;
+            if (typeof ms === 'number' && !isNaN(ms)) {
+              return formatDuration(Math.round(ms / 1000));
+            }
           }
 
-          if (!item) {
-            console.warn(`[RouteMatrix] mode=${travelMode} no item in matrix`);
-            return undefined;
+          // TRANSIT で ROUTE_NOT_FOUND の場合、computeRoutes (単一区間API) でフォールバック
+          // Matrix は多OD向けで TRANSIT のカバレッジが薄いため、単区間APIの方が成功率が高い
+          if (travelMode === 'TRANSIT' && Route?.computeRoutes) {
+            dlog(`[Route fallback] trying computeRoutes for TRANSIT`);
+            try {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const routesReq: any = {
+                origin: originLatLng,
+                destination: destLatLng,
+                travelMode: 'TRANSIT',
+                departureTime: new Date(),
+                fields: ['durationMillis'],
+                language: 'ja',
+                region: 'JP',
+                computeAlternativeRoutes: false,
+              };
+              const routesRes = await Route.computeRoutes(routesReq);
+              const route = routesRes?.routes?.[0];
+              dlog(`[Route fallback] result durationMillis=${route?.durationMillis}`);
+              const ms2 = route?.durationMillis;
+              if (typeof ms2 === 'number' && !isNaN(ms2)) {
+                return formatDuration(Math.round(ms2 / 1000));
+              }
+            } catch (fallbackErr) {
+              dlog(`[Route fallback] failed:`, fallbackErr);
+            }
           }
-          if (item.condition !== 'ROUTE_EXISTS') {
-            console.warn(`[RouteMatrix] mode=${travelMode} condition=${item.condition} (expected ROUTE_EXISTS)`);
-            return undefined;
-          }
-          const ms = item.durationMillis;
-          if (typeof ms !== 'number' || isNaN(ms)) {
-            console.warn(`[RouteMatrix] mode=${travelMode} no durationMillis (type=${typeof ms}, value=${ms}):`, item);
-            return undefined;
-          }
-          console.log(`[RouteMatrix DEBUG][${travelMode}] SUCCESS durationMillis=${ms}ms => ${formatDuration(Math.round(ms / 1000))}`);
-          return formatDuration(Math.round(ms / 1000));
+          return undefined;
         } catch (e) {
           console.error(`[RouteMatrix] mode=${travelMode} EXCEPTION:`, e);
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          console.error(`[RouteMatrix] mode=${travelMode} error message:`, (e as any)?.message);
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          console.error(`[RouteMatrix] mode=${travelMode} error name:`, (e as any)?.name);
           return undefined;
         }
       };
