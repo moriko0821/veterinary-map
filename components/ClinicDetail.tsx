@@ -128,10 +128,13 @@ export default function ClinicDetail({ id }: Props) {
 
       const callMode = async (travelMode: 'WALK' | 'DRIVE' | 'TRANSIT'): Promise<string | undefined> => {
         try {
+          // ComputeRouteMatrixRequest:
+          //   origins/destinations は LatLng/LatLngLiteral 等を直接配列に
+          //   (Waypoint や RouteMatrixOrigin でラップする必要はない、ラップ可能だが必須ではない)
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const request: any = {
-            origins: [{ waypoint: originLatLng }],
-            destinations: [{ waypoint: destLatLng }],
+            origins: [originLatLng],
+            destinations: [destLatLng],
             travelMode,
           };
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
