@@ -104,53 +104,80 @@ export default function ClinicDetail({ id }: Props) {
       );
 
       // 2) Google Maps JS SDK が読み込まれているか確認
-      //    地図が既に表示されているはずなので通常は読み込み済み
-      if (typeof google === 'undefined' || !google.maps?.DistanceMatrixService) {
+      if (typeof google === 'undefined' || !google.maps?.importLibrary) {
         throw new Error('Maps SDK not loaded');
       }
 
-      const service = new google.maps.DistanceMatrixService();
-      const origin = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-      const destination = { lat: clinic.lat!, lng: clinic.lng! };
+      // 3) 新しい Routes ライブラリを動的読み込み (旧 DistanceMatrix の置き換え)
+      //    Google が 2026-02-25 に DistanceMatrix を非推奨化、12ヶ月後削除予定。
+      //    Routes API は公共交通機関のルーティングが大幅改善されている。
+      //    eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const routesLib = (await google.maps.importLibrary('routes')) as any;
+      const RouteMatrix = routesLib?.RouteMatrix;
+      if (!RouteMatrix?.computeRouteMatrix) {
+        throw new Error('Routes API not available');
+      }
 
-      // 3) 各移動モードで所要時間を取得 (SDK経由なのでCORS問題なし)
-      //    TRANSIT モードは departureTime が必須 (指定しないと ZERO_RESULTS になりがち)
-      const callMode = (mode: google.maps.TravelMode) =>
-        new Promise<string | undefined>((resolve) => {
-          const request: google.maps.DistanceMatrixRequest = {
+      // 4) 経路ごとに RouteMatrix を呼ぶ
+      //    travelMode: WALK / DRIVE / TRANSIT
+      //    response は AsyncIterable で各要素ごとに ROUTE_EXISTS か判定
+      const origin = {
+        waypoint: {
+          location: { latLng: { latitude: pos.coords.latitude, longitude: pos.coords.longitude } },
+        },
+      };
+      const destination = {
+        waypoint: {
+          location: { latLng: { latitude: clinic.lat!, longitude: clinic.lng! } },
+        },
+      };
+
+      const callMode = async (travelMode: 'WALK' | 'DRIVE' | 'TRANSIT'): Promise<string | undefined> => {
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const request: any = {
             origins: [origin],
             destinations: [destination],
-            travelMode: mode,
+            travelMode,
           };
-          if (mode === google.maps.TravelMode.TRANSIT) {
-            request.transitOptions = { departureTime: new Date() };
+          if (travelMode === 'TRANSIT') {
+            request.transitPreferences = { routingPreference: 'LESS_WALKING' };
           }
-          service.getDistanceMatrix(request, (result, status) => {
-            if (status !== google.maps.DistanceMatrixStatus.OK || !result) {
-              console.warn(`[DistanceMatrix] mode=${mode} top-level status=${status}`);
-              resolve(undefined);
-              return;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const iter: AsyncIterable<any> = await RouteMatrix.computeRouteMatrix(request);
+          for await (const el of iter) {
+            // condition: 'ROUTE_EXISTS' | 'ROUTE_NOT_FOUND'
+            if (el?.condition !== 'ROUTE_EXISTS') {
+              console.warn(`[RouteMatrix] mode=${travelMode} condition=${el?.condition}`);
+              return undefined;
             }
-            const element = result.rows[0]?.elements[0];
-            if (element?.status === 'OK') {
-              resolve(element.duration?.text);
-            } else {
-              console.warn(`[DistanceMatrix] mode=${mode} element status=${element?.status}`);
-              resolve(undefined);
-            }
-          });
-        });
+            // duration は "120s" のような文字列、または { seconds: number }
+            const d = el?.duration;
+            const seconds =
+              typeof d === 'string' ? parseInt(d.replace('s', ''), 10) :
+              typeof d?.seconds === 'number' ? d.seconds :
+              typeof d?.seconds === 'string' ? parseInt(d.seconds, 10) :
+              undefined;
+            if (seconds === undefined || isNaN(seconds)) return undefined;
+            return formatDuration(seconds);
+          }
+          return undefined;
+        } catch (e) {
+          console.warn(`[RouteMatrix] mode=${travelMode} error:`, e);
+          return undefined;
+        }
+      };
 
       const [walking, driving, transit] = await Promise.all([
-        callMode(google.maps.TravelMode.WALKING),
-        callMode(google.maps.TravelMode.DRIVING),
-        callMode(google.maps.TravelMode.TRANSIT),
+        callMode('WALK'),
+        callMode('DRIVE'),
+        callMode('TRANSIT'),
       ]);
 
       // 全部 undefined だったら明確にエラー表示
       if (!walking && !driving && !transit) {
         setTravelError(
-          '所要時間を取得できませんでした。Distance Matrix API が有効化されているか、API キーの制限を確認してください。',
+          '所要時間を取得できませんでした。Routes API が有効化されているか、API キーの制限を確認してください。',
         );
         return;
       }
@@ -161,6 +188,8 @@ export default function ClinicDetail({ id }: Props) {
       const msg = (e as Error)?.message ?? '';
       if (msg.includes('Maps SDK not loaded')) {
         setTravelError('地図の読み込みが完了していません。少し待ってから再度お試しください。');
+      } else if (msg.includes('Routes API not available')) {
+        setTravelError('Routes API が利用できません。GCP で Routes API を有効化してください。');
       } else if (msg.toLowerCase().includes('denied') || (e as GeolocationPositionError)?.code === 1) {
         setTravelError('位置情報の許可が必要です。ブラウザの設定から位置情報を許可してください。');
       } else if ((e as GeolocationPositionError)?.code === 3) {
@@ -374,6 +403,15 @@ export default function ClinicDetail({ id }: Props) {
       </section>
     </main>
   );
+}
+
+function formatDuration(seconds: number): string {
+  if (seconds < 60) return '1分未満';
+  const totalMinutes = Math.round(seconds / 60);
+  if (totalMinutes < 60) return `${totalMinutes}分`;
+  const hours = Math.floor(totalMinutes / 60);
+  const mins = totalMinutes % 60;
+  return mins === 0 ? `${hours}時間` : `${hours}時間${mins}分`;
 }
 
 function TravelCard({
