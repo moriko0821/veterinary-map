@@ -115,8 +115,8 @@ export default function MyPage() {
           <div className="bg-white rounded-xl border border-slate-200 divide-y divide-slate-100">
             <Row icon={Star} label="アプリ評価をつける" right="準備中" />
             <Row icon={Info} label="このアプリについて" right="v0.1 MVP" />
-            <Row icon={Info} label="プライバシーポリシー" right="準備中" />
-            <Row icon={Info} label="利用規約" right="準備中" />
+            <Row icon={Info} label="プライバシーポリシー" href="/privacy" />
+            <Row icon={Info} label="利用規約" href="/terms" />
           </div>
         )}
       </div>
@@ -146,16 +146,34 @@ function Row({
   icon: Icon,
   label,
   right,
+  href,
 }: {
   icon: React.ComponentType<{ size?: number; className?: string }>;
   label: string;
-  right: string;
+  right?: string;
+  href?: string;
 }) {
-  return (
-    <div className="px-4 py-3 flex items-center gap-3">
+  const inner = (
+    <>
       <Icon size={18} className="text-slate-500" />
       <span className="flex-1 text-sm text-slate-800">{label}</span>
-      <span className="text-xs text-slate-400">{right}</span>
+      {right ? (
+        <span className="text-xs text-slate-400">{right}</span>
+      ) : (
+        <span className="text-xs text-slate-400">›</span>
+      )}
+    </>
+  );
+  if (href) {
+    return (
+      <Link href={href} className="px-4 py-3 flex items-center gap-3 hover:bg-slate-50 active:bg-slate-100">
+        {inner}
+      </Link>
+    );
+  }
+  return (
+    <div className="px-4 py-3 flex items-center gap-3">
+      {inner}
     </div>
   );
 }
