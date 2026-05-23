@@ -129,13 +129,15 @@ export default function ClinicDetail({ id }: Props) {
       const callMode = async (travelMode: 'WALK' | 'DRIVE' | 'TRANSIT'): Promise<string | undefined> => {
         try {
           // ComputeRouteMatrixRequest:
-          //   origins/destinations は LatLng/LatLngLiteral 等を直接配列に
-          //   (Waypoint や RouteMatrixOrigin でラップする必要はない、ラップ可能だが必須ではない)
+          //   origins/destinations は LatLng を直接配列に入れる (Waypoint ラップ不要)
+          //   fields は必須。欲しいフィールドだけ指定すれば帯域/コスト節約。
+          //   今回必要なのは「経路が存在するか」と「所要時間」のみ。
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const request: any = {
             origins: [originLatLng],
             destinations: [destLatLng],
             travelMode,
+            fields: ['condition', 'duration'],
           };
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const iter: AsyncIterable<any> = await RouteMatrix.computeRouteMatrix(request);
