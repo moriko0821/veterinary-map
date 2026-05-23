@@ -132,6 +132,7 @@ export default function ClinicDetail({ id }: Props) {
           //   - origins/destinations: LatLng を配列に直接 (Waypoint ラップ不要)
           //   - travelMode: WALKING/DRIVING/TRANSIT (旧 TravelMode enum と同じ)
           //   - fields: 必須。JS SDKでの正式名は 'durationMillis'
+          //   - TRANSIT 時のみ departureTime + transitPreference を追加で成功率向上
           // 戻り値: Promise<{matrix: RouteMatrix}>
           //   matrix.rows[origin_idx].items[destination_idx] が RouteMatrixItem
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -140,7 +141,16 @@ export default function ClinicDetail({ id }: Props) {
             destinations: [destLatLng],
             travelMode,
             fields: ['condition', 'durationMillis'],
+            language: 'ja',
+            region: 'JP',
           };
+          if (travelMode === 'TRANSIT') {
+            request.departureTime = new Date();
+            request.transitPreference = {
+              allowedTransitModes: ['TRAIN', 'SUBWAY', 'BUS', 'RAIL', 'TRAM'],
+              routingPreference: 'LESS_WALKING',
+            };
+          }
           const { matrix } = await RouteMatrix.computeRouteMatrix(request);
           const item = matrix?.rows?.[0]?.items?.[0];
           if (!item) {
