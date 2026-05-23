@@ -22,8 +22,8 @@ const CSP_DIRECTIVES = [
   "img-src 'self' data: blob: https://*.googleapis.com https://*.gstatic.com https://*.google.com https://*.ggpht.com",
   // フォント: Self + Google Fonts
   "font-src 'self' data: https://fonts.gstatic.com",
-  // fetch/xhr: Self + Supabase + Google Maps
-  "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://maps.googleapis.com",
+  // fetch/xhr: Self + Supabase + Google Maps (legacy) + Google Routes API
+  "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://maps.googleapis.com https://routes.googleapis.com",
   // フレーム埋め込みを禁止 (X-Frame-Options 同等)
   "frame-ancestors 'none'",
   // 基本URI制限

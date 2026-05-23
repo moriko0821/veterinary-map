@@ -126,7 +126,7 @@ export default function ClinicDetail({ id }: Props) {
       );
       const destLatLng = new google.maps.LatLng(clinic.lat!, clinic.lng!);
 
-      const callMode = async (travelMode: 'WALK' | 'DRIVE' | 'TRANSIT'): Promise<string | undefined> => {
+      const callMode = async (travelMode: 'WALKING' | 'DRIVING' | 'TRANSIT'): Promise<string | undefined> => {
         try {
           // ComputeRouteMatrixRequest:
           //   origins/destinations: LatLng を配列に直接入れる (Waypoint ラップ不要)
@@ -162,8 +162,8 @@ export default function ClinicDetail({ id }: Props) {
       };
 
       const [walking, driving, transit] = await Promise.all([
-        callMode('WALK'),
-        callMode('DRIVE'),
+        callMode('WALKING'),
+        callMode('DRIVING'),
         callMode('TRANSIT'),
       ]);
 
