@@ -28,7 +28,10 @@ export default function ClinicDetail({ id }: Props) {
   const [reviews, setReviews] = useState<Review[]>([]);
   const [loading, setLoading] = useState(true);
   const [favored, setFavored] = useState(false);
+  // ページ全体に関わる致命的なエラー (病院データが取れなかった等)
   const [error, setError] = useState<string | null>(null);
+  // Distance Matrix のような部分的な機能エラー (ページ全体は表示しつつ局所表示)
+  const [travelError, setTravelError] = useState<string | null>(null);
   const [travelInfo, setTravelInfo] = useState<{
     walking?: string;
     driving?: string;
@@ -93,6 +96,7 @@ export default function ClinicDetail({ id }: Props) {
   const computeTravelTime = async () => {
     if (!clinic?.lat || !clinic?.lng) return;
     setComputingTravel(true);
+    setTravelError(null);
     try {
       const pos = await new Promise<GeolocationPosition>((res, rej) =>
         navigator.geolocation.getCurrentPosition(res, rej, { timeout: 8000 }),
@@ -116,8 +120,9 @@ export default function ClinicDetail({ id }: Props) {
       ]);
       setTravelInfo({ walking, driving, transit });
     } catch (e) {
-      console.error(e);
-      setError('現在地からの所要時間を計算できませんでした');
+      console.error('[ClinicDetail] travel time error:', e);
+      // ページ全体ではなく travelError に格納 (ボタン近くに局所表示)
+      setTravelError('所要時間を計算できませんでした。位置情報の許可を確認してください。');
     } finally {
       setComputingTravel(false);
     }
@@ -265,13 +270,20 @@ export default function ClinicDetail({ id }: Props) {
             <TravelCard label="公共交通" value={travelInfo.transit} emoji="🚆" />
           </div>
         ) : (
-          <button
-            onClick={computeTravelTime}
-            disabled={computingTravel}
-            className="w-full py-2.5 rounded-xl border-2 border-orange-200 text-orange-700 text-sm font-medium disabled:opacity-50"
-          >
-            {computingTravel ? '計算中…' : '現在地から計算する'}
-          </button>
+          <>
+            <button
+              onClick={computeTravelTime}
+              disabled={computingTravel}
+              className="w-full py-2.5 rounded-xl border-2 border-orange-200 text-orange-700 text-sm font-medium disabled:opacity-50"
+            >
+              {computingTravel ? '計算中…' : '現在地から計算する'}
+            </button>
+            {travelError && (
+              <div className="mt-2 p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
+                {travelError}
+              </div>
+            )}
+          </>
         )}
       </section>
 
