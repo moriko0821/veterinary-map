@@ -147,7 +147,8 @@ export default function ClinicDetail({ id }: Props) {
           if (travelMode === 'TRANSIT') {
             request.departureTime = new Date();
             request.transitPreference = {
-              allowedTransitModes: ['TRAIN', 'SUBWAY', 'BUS', 'RAIL', 'TRAM'],
+              // TRAM は API 非対応。路面電車は LIGHT_RAIL を使う (InvalidValueError 回避)
+              allowedTransitModes: ['TRAIN', 'SUBWAY', 'BUS', 'RAIL', 'LIGHT_RAIL'],
               routingPreference: 'LESS_WALKING',
             };
           }
