@@ -35,7 +35,6 @@ export default function ClinicDetail({ id }: Props) {
   const [travelInfo, setTravelInfo] = useState<{
     walking?: string;
     driving?: string;
-    transit?: string;
   } | null>(null);
   const [computingTravel, setComputingTravel] = useState(false);
 
@@ -108,13 +107,11 @@ export default function ClinicDetail({ id }: Props) {
         throw new Error('Maps SDK not loaded');
       }
 
-      // 3) 新しい Routes ライブラリを動的読み込み (旧 DistanceMatrix の置き換え)
-      //    Google が 2026-02-25 に DistanceMatrix を非推奨化、12ヶ月後削除予定。
-      //    RouteMatrix: 多OD向け / Route.computeRoutes: 単一区間で乗換案内が強い
+      // 3) Routes ライブラリを動的読み込み (旧 DistanceMatrix の置き換え)
+      //    公共交通機関は Google マップへの誘導に統一したため、ここでは徒歩・車のみ計算
       //    eslint-disable-next-line @typescript-eslint/no-explicit-any
       const routesLib = (await google.maps.importLibrary('routes')) as any;
       const RouteMatrix = routesLib?.RouteMatrix;
-      const Route = routesLib?.Route;
       if (!RouteMatrix?.computeRouteMatrix) {
         throw new Error('Routes API not available');
       }
@@ -130,15 +127,8 @@ export default function ClinicDetail({ id }: Props) {
       );
       const destLatLng = new google.maps.LatLng(clinic.lat!, clinic.lng!);
 
-      const callMode = async (travelMode: 'WALKING' | 'DRIVING' | 'TRANSIT'): Promise<string | undefined> => {
+      const callMode = async (travelMode: 'WALKING' | 'DRIVING'): Promise<string | undefined> => {
         try {
-          // ComputeRouteMatrixRequest:
-          //   - origins/destinations: LatLng を配列に直接 (Waypoint ラップ不要)
-          //   - travelMode: WALKING/DRIVING/TRANSIT (旧 TravelMode enum と同じ)
-          //   - fields: 必須。JS SDKでの正式名は 'durationMillis'
-          //   - TRANSIT 時のみ departureTime + transitPreference を追加で成功率向上
-          // 戻り値: Promise<{matrix: RouteMatrix}>
-          //   matrix.rows[origin_idx].items[destination_idx] が RouteMatrixItem
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const request: any = {
             origins: [originLatLng],
@@ -148,50 +138,15 @@ export default function ClinicDetail({ id }: Props) {
             language: 'ja',
             region: 'JP',
           };
-          if (travelMode === 'TRANSIT') {
-            request.departureTime = new Date();
-            // transitPreference は意図的に外す: LESS_WALKING 等の制約が
-            // ROUTE_NOT_FOUND を増やすため、デフォルト (全モード許可) で広く探す
-          }
-
           dlog(`[RouteMatrix][${travelMode}] REQUEST origin=${pos.coords.latitude},${pos.coords.longitude} dest=${clinic.lat},${clinic.lng}`);
           const response = await RouteMatrix.computeRouteMatrix(request);
-          const { matrix } = response ?? {};
-          const item = matrix?.rows?.[0]?.items?.[0];
-          dlog(`[RouteMatrix][${travelMode}] item.condition=${item?.condition} durationMillis=${item?.durationMillis}`);
+          const item = response?.matrix?.rows?.[0]?.items?.[0];
+          dlog(`[RouteMatrix][${travelMode}] condition=${item?.condition} durationMillis=${item?.durationMillis}`);
 
           if (item?.condition === 'ROUTE_EXISTS') {
             const ms = item.durationMillis;
             if (typeof ms === 'number' && !isNaN(ms)) {
               return formatDuration(Math.round(ms / 1000));
-            }
-          }
-
-          // TRANSIT で ROUTE_NOT_FOUND の場合、computeRoutes (単一区間API) でフォールバック
-          // Matrix は多OD向けで TRANSIT のカバレッジが薄いため、単区間APIの方が成功率が高い
-          if (travelMode === 'TRANSIT' && Route?.computeRoutes) {
-            dlog(`[Route fallback] trying computeRoutes for TRANSIT`);
-            try {
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              const routesReq: any = {
-                origin: originLatLng,
-                destination: destLatLng,
-                travelMode: 'TRANSIT',
-                departureTime: new Date(),
-                fields: ['durationMillis'],
-                language: 'ja',
-                region: 'JP',
-                computeAlternativeRoutes: false,
-              };
-              const routesRes = await Route.computeRoutes(routesReq);
-              const route = routesRes?.routes?.[0];
-              dlog(`[Route fallback] result durationMillis=${route?.durationMillis}`);
-              const ms2 = route?.durationMillis;
-              if (typeof ms2 === 'number' && !isNaN(ms2)) {
-                return formatDuration(Math.round(ms2 / 1000));
-              }
-            } catch (fallbackErr) {
-              dlog(`[Route fallback] failed:`, fallbackErr);
             }
           }
           return undefined;
@@ -201,18 +156,15 @@ export default function ClinicDetail({ id }: Props) {
         }
       };
 
-      const [walking, driving, transit] = await Promise.all([
+      const [walking, driving] = await Promise.all([
         callMode('WALKING'),
         callMode('DRIVING'),
-        callMode('TRANSIT'),
       ]);
 
-      // 1つでも値が取れていれば成功表示 (公共交通だけ「なし」は許容)
-      if (walking || driving || transit) {
-        setTravelInfo({ walking, driving, transit });
+      if (walking || driving) {
+        setTravelInfo({ walking, driving });
         return;
       }
-      // 全部空 = 通信失敗 or 設定問題の可能性大。コンソールに詳細あり
       setTravelError(
         '所要時間を取得できませんでした。しばらく経ってから再度お試しください。',
       );
@@ -371,10 +323,9 @@ export default function ClinicDetail({ id }: Props) {
           現在地からの所要時間
         </h3>
         {travelInfo ? (
-          <div className="grid grid-cols-3 gap-2 mt-2">
+          <div className="grid grid-cols-2 gap-2 mt-2">
             <TravelCard label="徒歩" value={travelInfo.walking} emoji="🚶" />
             <TravelCard label="車" value={travelInfo.driving} emoji="🚗" />
-            <TravelCard label="公共交通" value={travelInfo.transit} emoji="🚆" />
           </div>
         ) : (
           <>
@@ -383,7 +334,7 @@ export default function ClinicDetail({ id }: Props) {
               disabled={computingTravel}
               className="w-full py-2.5 rounded-xl border-2 border-orange-200 text-orange-700 text-sm font-medium disabled:opacity-50"
             >
-              {computingTravel ? '計算中…' : '現在地から計算する'}
+              {computingTravel ? '計算中…' : '徒歩・車の所要時間を計算'}
             </button>
             {travelError && (
               <div className="mt-2 p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
@@ -391,6 +342,19 @@ export default function ClinicDetail({ id }: Props) {
               </div>
             )}
           </>
+        )}
+
+        {/* 公共交通機関は Google マップに誘導 (App/Web どちらでも開く) */}
+        {clinic.lat && clinic.lng && (
+          <a
+            href={`https://www.google.com/maps/dir/?api=1&destination=${clinic.lat},${clinic.lng}&travelmode=transit`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-3 w-full inline-flex items-center justify-center gap-2 py-2.5 rounded-xl bg-blue-50 text-blue-700 text-sm font-medium border-2 border-blue-100 active:bg-blue-100 transition"
+          >
+            <span>🚆</span>
+            <span>公共交通機関は Google マップで確認</span>
+          </a>
         )}
       </section>
 
