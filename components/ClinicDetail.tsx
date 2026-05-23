@@ -151,7 +151,10 @@ export default function ClinicDetail({ id }: Props) {
           }
           return undefined;
         } catch (e) {
-          console.error(`[RouteMatrix] mode=${travelMode} EXCEPTION:`, e);
+          // 本番ではエラー詳細を出力しない (位置情報・実装情報の漏えい防止)
+          if (process.env.NODE_ENV === 'development') {
+            console.error(`[RouteMatrix] mode=${travelMode} EXCEPTION:`, e);
+          }
           return undefined;
         }
       };
@@ -169,12 +172,14 @@ export default function ClinicDetail({ id }: Props) {
         '所要時間を取得できませんでした。しばらく経ってから再度お試しください。',
       );
     } catch (e) {
-      console.error('[ClinicDetail] travel time error:', e);
+      // 本番ではエラー詳細を出力しない (位置情報・実装情報の漏えい防止)
+      if (process.env.NODE_ENV === 'development') {
+        console.error('[ClinicDetail] travel time error:', e);
+      }
       const msg = (e as Error)?.message ?? '';
-      if (msg.includes('Maps SDK not loaded')) {
+      if (msg.includes('Maps SDK not loaded') || msg.includes('Routes API not available')) {
+        // 内部実装名 (Routes API, GCP) を露出させない汎用文面
         setTravelError('地図の読み込みが完了していません。少し待ってから再度お試しください。');
-      } else if (msg.includes('Routes API not available')) {
-        setTravelError('Routes API が利用できません。GCP で Routes API を有効化してください。');
       } else if (msg.toLowerCase().includes('denied') || (e as GeolocationPositionError)?.code === 1) {
         setTravelError('位置情報の許可が必要です。ブラウザの設定から位置情報を許可してください。');
       } else if ((e as GeolocationPositionError)?.code === 3) {
@@ -345,17 +350,28 @@ export default function ClinicDetail({ id }: Props) {
         )}
 
         {/* 公共交通機関は Google マップに誘導 (App/Web どちらでも開く) */}
-        {clinic.lat && clinic.lng && (
-          <a
-            href={`https://www.google.com/maps/dir/?api=1&destination=${clinic.lat},${clinic.lng}&travelmode=transit`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="mt-3 w-full inline-flex items-center justify-center gap-2 py-2.5 rounded-xl bg-blue-50 text-blue-700 text-sm font-medium border-2 border-blue-100 active:bg-blue-100 transition"
-          >
-            <span>🚆</span>
-            <span>公共交通機関は Google マップで確認</span>
-          </a>
-        )}
+        {/* lat/lng は数値型だが、NaN/Infinity/範囲外 が混入した場合に不正URLを生成しないよう検証 */}
+        {(() => {
+          const lat = clinic.lat;
+          const lng = clinic.lng;
+          if (
+            typeof lat !== 'number' || typeof lng !== 'number' ||
+            !Number.isFinite(lat) || !Number.isFinite(lng) ||
+            Math.abs(lat) > 90 || Math.abs(lng) > 180
+          ) return null;
+          const url = `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=transit`;
+          return (
+            <a
+              href={url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-3 w-full inline-flex items-center justify-center gap-2 py-2.5 rounded-xl bg-blue-50 text-blue-700 text-sm font-medium border-2 border-blue-100 active:bg-blue-100 transition"
+            >
+              <span>🚆</span>
+              <span>公共交通機関は Google マップで確認</span>
+            </a>
+          );
+        })()}
       </section>
 
       {/* 営業時間 */}

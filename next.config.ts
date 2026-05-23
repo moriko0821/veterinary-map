@@ -11,11 +11,17 @@ import type { NextConfig } from "next";
 //   Distance Matrix API:    maps.googleapis.com (ブラウザから fetch)
 //   Supabase:               *.supabase.co (REST + WebSocket)
 // ============================================================
+// スクリプト指令: 'unsafe-eval' は Next.js dev で React Refresh 等が必要とするため dev のみ追加。
+// 本番では eval を使う実装がないため削除し XSS の影響範囲を縮小する。
+const SCRIPT_SRC = process.env.NODE_ENV === 'production'
+  ? "script-src 'self' 'unsafe-inline' https://maps.googleapis.com https://maps.gstatic.com"
+  : "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://maps.googleapis.com https://maps.gstatic.com";
+
 const CSP_DIRECTIVES = [
   // 基本: 同一オリジンのみ
   "default-src 'self'",
-  // スクリプト: Self + Google Maps. Next.js dev 用に 'unsafe-eval' を含める (本番では削るのが理想)
-  "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://maps.googleapis.com https://maps.gstatic.com",
+  // スクリプト: 環境別 (上記 SCRIPT_SRC 参照)
+  SCRIPT_SRC,
   // スタイル: Self + inline (Tailwind) + Google Maps
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   // 画像: Self + データURI + Google Maps タイル + Google Maps ロゴ
