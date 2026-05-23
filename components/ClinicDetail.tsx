@@ -98,31 +98,72 @@ export default function ClinicDetail({ id }: Props) {
     setComputingTravel(true);
     setTravelError(null);
     try {
+      // 1) 現在地を取得
       const pos = await new Promise<GeolocationPosition>((res, rej) =>
         navigator.geolocation.getCurrentPosition(res, rej, { timeout: 8000 }),
       );
-      const origin = `${pos.coords.latitude},${pos.coords.longitude}`;
-      const dest = `${clinic.lat},${clinic.lng}`;
-      const key = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? '';
-      const fetchMode = (mode: string) =>
-        fetch(
-          `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${origin}&destinations=${dest}&mode=${mode}&language=ja&key=${key}`,
-        )
-          .then((r) => r.json())
-          .then(
-            (j) =>
-              j?.rows?.[0]?.elements?.[0]?.duration?.text as string | undefined,
+
+      // 2) Google Maps JS SDK が読み込まれているか確認
+      //    地図が既に表示されているはずなので通常は読み込み済み
+      if (typeof google === 'undefined' || !google.maps?.DistanceMatrixService) {
+        throw new Error('Maps SDK not loaded');
+      }
+
+      const service = new google.maps.DistanceMatrixService();
+      const origin = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+      const destination = { lat: clinic.lat!, lng: clinic.lng! };
+
+      // 3) 各移動モードで所要時間を取得 (SDK経由なのでCORS問題なし)
+      const callMode = (mode: google.maps.TravelMode) =>
+        new Promise<string | undefined>((resolve) => {
+          service.getDistanceMatrix(
+            {
+              origins: [origin],
+              destinations: [destination],
+              travelMode: mode,
+            },
+            (result, status) => {
+              if (status !== google.maps.DistanceMatrixStatus.OK || !result) {
+                resolve(undefined);
+                return;
+              }
+              const element = result.rows[0]?.elements[0];
+              if (element?.status === 'OK') {
+                resolve(element.duration?.text);
+              } else {
+                resolve(undefined);
+              }
+            },
           );
+        });
+
       const [walking, driving, transit] = await Promise.all([
-        fetchMode('walking'),
-        fetchMode('driving'),
-        fetchMode('transit'),
+        callMode(google.maps.TravelMode.WALKING),
+        callMode(google.maps.TravelMode.DRIVING),
+        callMode(google.maps.TravelMode.TRANSIT),
       ]);
+
+      // 全部 undefined だったら明確にエラー表示
+      if (!walking && !driving && !transit) {
+        setTravelError(
+          '所要時間を取得できませんでした。Distance Matrix API が有効化されているか、API キーの制限を確認してください。',
+        );
+        return;
+      }
+
       setTravelInfo({ walking, driving, transit });
     } catch (e) {
       console.error('[ClinicDetail] travel time error:', e);
-      // ページ全体ではなく travelError に格納 (ボタン近くに局所表示)
-      setTravelError('所要時間を計算できませんでした。位置情報の許可を確認してください。');
+      const msg = (e as Error)?.message ?? '';
+      if (msg.includes('Maps SDK not loaded')) {
+        setTravelError('地図の読み込みが完了していません。少し待ってから再度お試しください。');
+      } else if (msg.toLowerCase().includes('denied') || (e as GeolocationPositionError)?.code === 1) {
+        setTravelError('位置情報の許可が必要です。ブラウザの設定から位置情報を許可してください。');
+      } else if ((e as GeolocationPositionError)?.code === 3) {
+        setTravelError('位置情報の取得がタイムアウトしました。屋外で再度お試しください。');
+      } else {
+        setTravelError('所要時間を計算できませんでした。位置情報の許可を確認してください。');
+      }
     } finally {
       setComputingTravel(false);
     }
