@@ -119,30 +119,21 @@ export default function ClinicDetail({ id }: Props) {
       }
 
       // 4) 経路ごとに RouteMatrix を呼ぶ
-      //    travelMode: WALK / DRIVE / TRANSIT
-      //    response は AsyncIterable で各要素ごとに ROUTE_EXISTS か判定
-      const origin = {
-        waypoint: {
-          location: { latLng: { latitude: pos.coords.latitude, longitude: pos.coords.longitude } },
-        },
-      };
-      const destination = {
-        waypoint: {
-          location: { latLng: { latitude: clinic.lat!, longitude: clinic.lng! } },
-        },
-      };
+      //    JS SDK は google.maps.LatLng インスタンスを期待 (REST形式 {latitude} ではない)
+      const originLatLng = new google.maps.LatLng(
+        pos.coords.latitude,
+        pos.coords.longitude,
+      );
+      const destLatLng = new google.maps.LatLng(clinic.lat!, clinic.lng!);
 
       const callMode = async (travelMode: 'WALK' | 'DRIVE' | 'TRANSIT'): Promise<string | undefined> => {
         try {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const request: any = {
-            origins: [origin],
-            destinations: [destination],
+            origins: [{ waypoint: originLatLng }],
+            destinations: [{ waypoint: destLatLng }],
             travelMode,
           };
-          if (travelMode === 'TRANSIT') {
-            request.transitPreferences = { routingPreference: 'LESS_WALKING' };
-          }
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const iter: AsyncIterable<any> = await RouteMatrix.computeRouteMatrix(request);
           for await (const el of iter) {
@@ -151,14 +142,17 @@ export default function ClinicDetail({ id }: Props) {
               console.warn(`[RouteMatrix] mode=${travelMode} condition=${el?.condition}`);
               return undefined;
             }
-            // duration は "120s" のような文字列、または { seconds: number }
+            // duration は "120s" 文字列 or { seconds: number } どちらの形もケア
             const d = el?.duration;
             const seconds =
               typeof d === 'string' ? parseInt(d.replace('s', ''), 10) :
               typeof d?.seconds === 'number' ? d.seconds :
               typeof d?.seconds === 'string' ? parseInt(d.seconds, 10) :
               undefined;
-            if (seconds === undefined || isNaN(seconds)) return undefined;
+            if (seconds === undefined || isNaN(seconds)) {
+              console.warn(`[RouteMatrix] mode=${travelMode} duration parse failed:`, d);
+              return undefined;
+            }
             return formatDuration(seconds);
           }
           return undefined;
