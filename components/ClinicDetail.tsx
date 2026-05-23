@@ -129,15 +129,15 @@ export default function ClinicDetail({ id }: Props) {
       const callMode = async (travelMode: 'WALK' | 'DRIVE' | 'TRANSIT'): Promise<string | undefined> => {
         try {
           // ComputeRouteMatrixRequest:
-          //   origins/destinations は LatLng を直接配列に入れる (Waypoint ラップ不要)
-          //   fields は必須。欲しいフィールドだけ指定すれば帯域/コスト節約。
-          //   今回必要なのは「経路が存在するか」と「所要時間」のみ。
+          //   origins/destinations: LatLng を配列に直接入れる (Waypoint ラップ不要)
+          //   fields: 必須。JS SDKでの正式名は 'durationMillis' (REST APIの 'duration' とは違う)
+          //   RouteMatrixItem.durationMillis は数値(ミリ秒)
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const request: any = {
             origins: [originLatLng],
             destinations: [destLatLng],
             travelMode,
-            fields: ['condition', 'duration'],
+            fields: ['condition', 'durationMillis'],
           };
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const iter: AsyncIterable<any> = await RouteMatrix.computeRouteMatrix(request);
@@ -147,18 +147,12 @@ export default function ClinicDetail({ id }: Props) {
               console.warn(`[RouteMatrix] mode=${travelMode} condition=${el?.condition}`);
               return undefined;
             }
-            // duration は "120s" 文字列 or { seconds: number } どちらの形もケア
-            const d = el?.duration;
-            const seconds =
-              typeof d === 'string' ? parseInt(d.replace('s', ''), 10) :
-              typeof d?.seconds === 'number' ? d.seconds :
-              typeof d?.seconds === 'string' ? parseInt(d.seconds, 10) :
-              undefined;
-            if (seconds === undefined || isNaN(seconds)) {
-              console.warn(`[RouteMatrix] mode=${travelMode} duration parse failed:`, d);
+            const ms = el?.durationMillis;
+            if (typeof ms !== 'number' || isNaN(ms)) {
+              console.warn(`[RouteMatrix] mode=${travelMode} no durationMillis:`, el);
               return undefined;
             }
-            return formatDuration(seconds);
+            return formatDuration(Math.round(ms / 1000));
           }
           return undefined;
         } catch (e) {
