@@ -114,27 +114,31 @@ export default function ClinicDetail({ id }: Props) {
       const destination = { lat: clinic.lat!, lng: clinic.lng! };
 
       // 3) 各移動モードで所要時間を取得 (SDK経由なのでCORS問題なし)
+      //    TRANSIT モードは departureTime が必須 (指定しないと ZERO_RESULTS になりがち)
       const callMode = (mode: google.maps.TravelMode) =>
         new Promise<string | undefined>((resolve) => {
-          service.getDistanceMatrix(
-            {
-              origins: [origin],
-              destinations: [destination],
-              travelMode: mode,
-            },
-            (result, status) => {
-              if (status !== google.maps.DistanceMatrixStatus.OK || !result) {
-                resolve(undefined);
-                return;
-              }
-              const element = result.rows[0]?.elements[0];
-              if (element?.status === 'OK') {
-                resolve(element.duration?.text);
-              } else {
-                resolve(undefined);
-              }
-            },
-          );
+          const request: google.maps.DistanceMatrixRequest = {
+            origins: [origin],
+            destinations: [destination],
+            travelMode: mode,
+          };
+          if (mode === google.maps.TravelMode.TRANSIT) {
+            request.transitOptions = { departureTime: new Date() };
+          }
+          service.getDistanceMatrix(request, (result, status) => {
+            if (status !== google.maps.DistanceMatrixStatus.OK || !result) {
+              console.warn(`[DistanceMatrix] mode=${mode} top-level status=${status}`);
+              resolve(undefined);
+              return;
+            }
+            const element = result.rows[0]?.elements[0];
+            if (element?.status === 'OK') {
+              resolve(element.duration?.text);
+            } else {
+              console.warn(`[DistanceMatrix] mode=${mode} element status=${element?.status}`);
+              resolve(undefined);
+            }
+          });
         });
 
       const [walking, driving, transit] = await Promise.all([
@@ -381,11 +385,14 @@ function TravelCard({
   value: string | undefined;
   emoji: string;
 }) {
+  const isAvailable = !!value;
   return (
-    <div className="bg-orange-50 rounded-xl p-3 text-center">
-      <div className="text-2xl">{emoji}</div>
+    <div className={`rounded-xl p-3 text-center ${isAvailable ? 'bg-orange-50' : 'bg-slate-100'}`}>
+      <div className={`text-2xl ${isAvailable ? '' : 'opacity-40 grayscale'}`}>{emoji}</div>
       <div className="text-[10px] text-slate-500 mt-1">{label}</div>
-      <div className="text-sm font-bold text-orange-700 mt-0.5">{value ?? '-'}</div>
+      <div className={`text-sm font-bold mt-0.5 ${isAvailable ? 'text-orange-700' : 'text-slate-400'}`}>
+        {value ?? 'なし'}
+      </div>
     </div>
   );
 }
